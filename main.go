@@ -21,8 +21,9 @@ var (
 	primary   = lipgloss.Color("#00FFFF")
 	secondary = lipgloss.Color("#9D7CFF")
 	white     = lipgloss.Color("#FAFAFA")
-	muted     = lipgloss.Color("#fdfdfd")
+	muted     = lipgloss.Color("#ffffff")
 	danger    = lipgloss.Color("#FF4D94")
+	success   = lipgloss.Color("#00FF88")
 	bgLight   = lipgloss.Color("#222222")
 
 	headerStyle = lipgloss.NewStyle().Foreground(white).Background(secondary).Padding(0, 2).Bold(true)
@@ -43,9 +44,9 @@ type model struct {
 	ports       []portInfo
 	filtered    []portInfo
 	cursor      int
-	lastKill    string
+	statusMsg   string
 	confirmKill bool
-	confirmQuit bool 
+	confirmQuit bool
 	search      string
 	totalMem    float32
 }
@@ -132,7 +133,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, doTick()
 
 	case clearMsg:
-		m.lastKill = ""
+		m.statusMsg = ""
 		return m, nil
 
 	case tea.KeyMsg:
@@ -147,17 +148,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.confirmQuit {
-			if msg.String() == "y" {
-				return m, tea.Quit
-			}
+			if msg.String() == "y" { return m, tea.Quit }
 			return m, nil
 		}
 
-		// Logique standard
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.confirmQuit = true
 			return m, nil
+
+		case "r":
+			m.ports = scanPorts()
+			m.applyFilter()
+			m.statusMsg = "SYSTEM REFRESHED"
+			return m, tea.Tick(time.Second*2, func(t time.Time) tea.Msg { return clearMsg{} })
 
 		case "up", "k":
 			if m.cursor > 0 { m.cursor-- }
@@ -181,7 +185,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					if p, _ := os.FindProcess(atoi(t.pid)); p != nil { p.Kill() }
 				}
-				m.lastKill = "KILLED: " + t.name
+				m.statusMsg = "KILLED: " + t.name
 				m.confirmKill = false
 				m.ports = scanPorts()
 				m.applyFilter()
@@ -234,11 +238,16 @@ func (m model) View() string {
 	curr := portInfo{}
 	if len(m.filtered) > 0 { curr = m.filtered[m.cursor] }
 
+	msgColor := danger
+	if strings.Contains(m.statusMsg, "REFRESHED") {
+		msgColor = success
+	}
+
 	inspectText := fmt.Sprintf(
 		"UNIT ANALYSIS\n%s\n\nNAME   : %s\nPID    : %s\nPORT   : %s\n\nCPU    : %.2f%%\nMEMORY : %.1f MB\n\n%s",
 		strings.Repeat("─", 34),
 		curr.name, curr.pid, curr.port, curr.cpu, curr.mem,
-		lipgloss.NewStyle().Foreground(danger).Bold(true).Render(m.lastKill),
+		lipgloss.NewStyle().Foreground(msgColor).Bold(true).Render(m.statusMsg),
 	)
 
 	if m.confirmKill {
@@ -256,7 +265,7 @@ func (m model) View() string {
 	stats := fmt.Sprintf(" NODES: %d | TOTAL RSS: %.1f MB ", len(m.filtered), m.totalMem)
 	header := headerStyle.Render(" GHOSTPORT ENGINE ") + lipgloss.NewStyle().Foreground(muted).Render(stats)
 	searchBar := lipgloss.NewStyle().Foreground(primary).Bold(true).Render("\n SEARCH > " + m.search + "_")
-	footer := lipgloss.NewStyle().Foreground(muted).Render("\n K: KILL • Q: QUIT • ESC: RESET")
+	footer := lipgloss.NewStyle().Foreground(muted).Render("\n R: REFRESH • K: KILL • Q: QUIT • ESC: RESET")
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(header + searchBar + "\n\n" + layout + footer)
 }
