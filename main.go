@@ -15,39 +15,20 @@ import (
 )
 
 type tickMsg time.Time
+type clearMsg struct{}
 
 var (
 	primary   = lipgloss.Color("#00FFFF")
 	secondary = lipgloss.Color("#9D7CFF")
 	white     = lipgloss.Color("#FAFAFA")
-	muted     = lipgloss.Color("#f8f6f6")
+	muted     = lipgloss.Color("#A0A0A0")
 	danger    = lipgloss.Color("#FF4D94")
 	bgLight   = lipgloss.Color("#222222")
 
-	headerStyle = lipgloss.NewStyle().
-			Foreground(white).
-			Background(secondary).
-			Padding(0, 2).
-			Bold(true)
-
-	sideStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder(), false, true, false, false).
-			BorderForeground(muted).
-			Padding(0, 1).
-			Width(12).
-			Foreground(white)
-
-	inspectStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(primary).
-			Background(bgLight).
-			Padding(1).
-			Width(38)
-
-	selStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
-			Background(primary).
-			Bold(true)
+	headerStyle = lipgloss.NewStyle().Foreground(white).Background(secondary).Padding(0, 2).Bold(true)
+	sideStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(muted).Padding(0, 1).Width(12).Foreground(white)
+	inspectStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(primary).Background(bgLight).Padding(1).Width(38)
+	selStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Background(primary).Bold(true)
 )
 
 type portInfo struct {
@@ -66,6 +47,7 @@ type model struct {
 	confirmKill bool
 	search      string
 	totalMem    float32
+	isKilling   bool
 }
 
 func doTick() tea.Cmd {
@@ -75,23 +57,19 @@ func doTick() tea.Cmd {
 func scanPorts() []portInfo {
 	var results []portInfo
 	var cmd *exec.Cmd
-
 	if runtime.GOOS == "windows" {
 		cmd = exec.Command("netstat", "-ano", "-p", "TCP")
 	} else {
 		cmd = exec.Command("ss", "-tlnp")
 	}
-
 	out, _ := cmd.Output()
 	lines := strings.Split(string(out), "\n")
 	var re *regexp.Regexp
-
 	if runtime.GOOS == "windows" {
 		re = regexp.MustCompile(`TCP\s+\d+\.\d+\.\d+\.\d+:(\d+)\s+\d+\.\d+\.\d+\.\d+:\d+\s+LISTENING\s+(\d+)`)
 	} else {
 		re = regexp.MustCompile(`LISTEN\s+\d+\s+\d+\s+[^:]+:(\d+)\s+[^:]+:\*\s+users:\(\("([^"]+)",pid=(\d+)`)
 	}
-
 	for _, line := range lines {
 		m := re.FindStringSubmatch(line)
 		if len(m) >= 3 {
@@ -102,7 +80,6 @@ func scanPorts() []portInfo {
 			} else {
 				pStr, name, pidStr = m[1], m[2], m[3]
 			}
-
 			cpu, mem := 0.0, float32(0.0)
 			if proc, err := process.NewProcess(int32(atoi(pidStr))); err == nil {
 				if n, err := proc.Name(); err == nil && (name == "Ghost" || name == "") {
@@ -148,37 +125,69 @@ func (m model) Init() tea.Cmd { return doTick() }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
-		m.ports = scanPorts()
-		m.applyFilter()
+		if !m.confirmKill {
+			m.ports = scanPorts()
+			m.applyFilter()
+		}
 		return m, doTick()
+
+	case clearMsg:
+		m.lastKill = ""
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+
+		case "esc":
+			m.confirmKill = false
+			m.search = ""
+			m.applyFilter()
+
 		case "up", "k":
 			if m.cursor > 0 { m.cursor-- }
 		case "down", "j":
 			if m.cursor < len(m.filtered)-1 { m.cursor++ }
+
 		case "backspace":
 			if len(m.search) > 0 {
 				m.search = m.search[:len(m.search)-1]
 				m.applyFilter()
 			}
+
 		case "K":
-			if len(m.filtered) > 0 { m.confirmKill = true }
+			if len(m.filtered) > 0 {
+				m.confirmKill = true
+			}
+
 		case "y":
 			if m.confirmKill && len(m.filtered) > 0 {
 				t := m.filtered[m.cursor]
-				if p, _ := os.FindProcess(atoi(t.pid)); p != nil {
-					p.Kill()
-					m.lastKill = "TERMINATED: " + t.name
+
+				// SUPPRESSION RADICALE (OS SPECIFIC)
+				if runtime.GOOS == "windows" {
+					exec.Command("taskkill", "/F", "/PID", t.pid).Run()
+				} else {
+					if p, _ := os.FindProcess(atoi(t.pid)); p != nil {
+						p.Kill()
+					}
 				}
+
+				m.lastKill = "KILLED: " + t.name
 				m.confirmKill = false
+
+				// Rafraîchissement immédiat
+				m.ports = scanPorts()
+				m.applyFilter()
+
+				return m, tea.Tick(time.Second*3, func(t time.Time) tea.Msg { return clearMsg{} })
 			}
 		case "n":
 			m.confirmKill = false
+
 		default:
-			if len(msg.String()) == 1 {
+			if len(msg.String()) == 1 && msg.Runes[0] >= 32 && msg.Runes[0] <= 126 {
 				m.search += msg.String()
 				m.applyFilter()
 			}
@@ -198,7 +207,7 @@ func renderBar(val float32) string {
 
 func (m model) View() string {
 	if len(m.filtered) == 0 && m.search == "" {
-		return "LOADING SYSTEM DATA..."
+		return "GHOSTPORT // SCANNING..."
 	}
 
 	var portsCol, mainCol strings.Builder
@@ -224,7 +233,7 @@ func (m model) View() string {
 	if len(m.filtered) > 0 { curr = m.filtered[m.cursor] }
 
 	inspect := fmt.Sprintf(
-		"PROCESS DETAILS\n%s\n\nNAME   : %s\nPID    : %s\nPORT   : %s\n\nCPU    : %.2f%%\nMEMORY : %.1f MB\n\n%s",
+		"UNIT ANALYSIS\n%s\n\nNAME   : %s\nPID    : %s\nPORT   : %s\n\nCPU    : %.2f%%\nMEMORY : %.1f MB\n\n%s",
 		strings.Repeat("─", 34),
 		curr.name, curr.pid, curr.port, curr.cpu, curr.mem,
 		lipgloss.NewStyle().Foreground(danger).Bold(true).Render(m.lastKill),
@@ -240,10 +249,10 @@ func (m model) View() string {
 		inspectStyle.Foreground(white).Render(inspect),
 	)
 
-	stats := fmt.Sprintf(" NODES: %d | RSS: %.1f MB ", len(m.filtered), m.totalMem)
+	stats := fmt.Sprintf(" NODES: %d | TOTAL RSS: %.1f MB ", len(m.filtered), m.totalMem)
 	header := headerStyle.Render(" GHOSTPORT ENGINE ") + lipgloss.NewStyle().Foreground(muted).Render(stats)
 	searchBar := lipgloss.NewStyle().Foreground(primary).Bold(true).Render("\n SEARCH > " + m.search + "_")
-	footer := lipgloss.NewStyle().Foreground(muted).Render("\n ARROWS: Nav • K: Kill • Q: Quit")
+	footer := lipgloss.NewStyle().Foreground(muted).Render("\n K: KILL • ESC: RESET • Q: QUIT")
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(header + searchBar + "\n\n" + layout + footer)
 }
