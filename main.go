@@ -26,10 +26,10 @@ var (
 	success   = lipgloss.Color("#00FF88")
 	bgLight   = lipgloss.Color("#222222")
 
-	headerStyle = lipgloss.NewStyle().Foreground(white).Background(secondary).Padding(0, 2).Bold(true)
-	sideStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(muted).Padding(0, 1).Width(12).Foreground(white)
+	headerStyle  = lipgloss.NewStyle().Foreground(white).Background(secondary).Padding(0, 2).Bold(true)
+	sideStyle    = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(muted).Padding(0, 1).Width(12).Foreground(white)
 	inspectStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(primary).Background(bgLight).Padding(1).Width(38)
-	selStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Background(primary).Bold(true)
+	selStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Background(primary).Bold(true)
 )
 
 type portInfo struct {
@@ -148,7 +148,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.confirmQuit {
-			if msg.String() == "y" { return m, tea.Quit }
+			if msg.String() == "y" {
+				return m, tea.Quit
+			}
 			return m, nil
 		}
 
@@ -164,9 +166,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Tick(time.Second*2, func(t time.Time) tea.Msg { return clearMsg{} })
 
 		case "up", "k":
-			if m.cursor > 0 { m.cursor-- }
+			if m.cursor > 0 {
+				m.cursor--
+			}
 		case "down", "j":
-			if m.cursor < len(m.filtered)-1 { m.cursor++ }
+			if m.cursor < len(m.filtered)-1 {
+				m.cursor++
+			}
 
 		case "backspace":
 			if len(m.search) > 0 {
@@ -175,7 +181,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "K":
-			if len(m.filtered) > 0 { m.confirmKill = true }
+			if len(m.filtered) > 0 {
+				m.confirmKill = true
+			}
 
 		case "y":
 			if m.confirmKill && len(m.filtered) > 0 {
@@ -183,7 +191,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if runtime.GOOS == "windows" {
 					exec.Command("taskkill", "/F", "/PID", t.pid).Run()
 				} else {
-					if p, _ := os.FindProcess(atoi(t.pid)); p != nil { p.Kill() }
+					if p, _ := os.FindProcess(atoi(t.pid)); p != nil {
+						p.Kill()
+					}
 				}
 				m.statusMsg = "KILLED: " + t.name
 				m.confirmKill = false
@@ -205,9 +215,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func renderBar(val float32) string {
 	width := 10
 	filled := int(val / 100)
-	if filled > width { filled = width }
+	if filled > width {
+		filled = width
+	}
 	barStyle := lipgloss.NewStyle().Foreground(primary)
-	if val > 300 { barStyle = lipgloss.NewStyle().Foreground(danger) }
+	if val > 300 {
+		barStyle = lipgloss.NewStyle().Foreground(danger)
+	}
 	return "[" + barStyle.Render(strings.Repeat("■", filled)+strings.Repeat(" ", width-filled)) + "]"
 }
 
@@ -218,8 +232,12 @@ func (m model) View() string {
 
 	var portsCol, mainCol strings.Builder
 	start, end := 0, len(m.filtered)
-	if m.cursor > 8 { start = m.cursor - 8 }
-	if start+12 < end { end = start + 12 }
+	if m.cursor > 8 {
+		start = m.cursor - 8
+	}
+	if start+12 < end {
+		end = start + 12
+	}
 
 	for i := start; i < end; i++ {
 		p := m.filtered[i]
@@ -236,7 +254,9 @@ func (m model) View() string {
 	}
 
 	curr := portInfo{}
-	if len(m.filtered) > 0 { curr = m.filtered[m.cursor] }
+	if len(m.filtered) > 0 {
+		curr = m.filtered[m.cursor]
+	}
 
 	msgColor := danger
 	if strings.Contains(m.statusMsg, "REFRESHED") {
