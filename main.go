@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -18,7 +19,6 @@ type tickMsg time.Time
 var (
 	accent = lipgloss.Color("#00FFD1")
 	mute   = lipgloss.Color("#555555")
-	bg     = lipgloss.Color("#121212")
 	warn   = lipgloss.Color("#FF0055")
 
 	sideStyle = lipgloss.NewStyle().
@@ -63,18 +63,44 @@ func doTick() tea.Cmd {
 
 func scanPorts() []portInfo {
 	var results []portInfo
-	cmd := exec.Command("netstat", "-ano", "-p", "TCP")
-	out, _ := cmd.Output()
-	re := regexp.MustCompile(`TCP\s+\d+\.\d+\.\d+\.\d+:(\d+)\s+\d+\.\d+\.\d+\.\d+:\d+\s+LISTENING\s+(\d+)`)
+	var cmd *exec.Cmd
+
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("netstat", "-ano", "-p", "TCP")
+	} else {
+		cmd = exec.Command("ss", "-tlnp")
+	}
+
+	out, err := cmd.Output()
+	if err != nil {
+		return results
+	}
+
 	lines := strings.Split(string(out), "\n")
+	var re *regexp.Regexp
+
+	if runtime.GOOS == "windows" {
+		re = regexp.MustCompile(`TCP\s+\d+\.\d+\.\d+\.\d+:(\d+)\s+\d+\.\d+\.\d+\.\d+:\d+\s+LISTENING\s+(\d+)`)
+	} else {
+		re = regexp.MustCompile(`LISTEN\s+\d+\s+\d+\s+[^:]+:(\d+)\s+[^:]+:\*\s+users:\(\("([^"]+)",pid=(\d+)`)
+	}
 
 	for _, line := range lines {
 		m := re.FindStringSubmatch(line)
-		if len(m) == 3 {
-			pStr, pidStr := m[1], m[2]
-			name, cpu, mem := "Ghost", 0.0, float32(0.0)
+		if len(m) >= 3 {
+			var pStr, pidStr, name string
+			if runtime.GOOS == "windows" {
+				pStr, pidStr = m[1], m[2]
+				name = "Ghost"
+			} else {
+				pStr, name, pidStr = m[1], m[2], m[3]
+			}
+
+			cpu, mem := 0.0, float32(0.0)
 			if proc, err := process.NewProcess(int32(atoi(pidStr))); err == nil {
-				name, _ = proc.Name()
+				if n, err := proc.Name(); err == nil && (name == "Ghost" || name == "") {
+					name = n
+				}
 				cpu, _ = proc.CPUPercent()
 				mInfo, _ := proc.MemoryInfo()
 				if mInfo != nil {
