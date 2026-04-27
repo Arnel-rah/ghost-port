@@ -21,7 +21,7 @@ var (
 	primary   = lipgloss.Color("#00FFFF")
 	secondary = lipgloss.Color("#9D7CFF")
 	white     = lipgloss.Color("#FAFAFA")
-	muted     = lipgloss.Color("#A0A0A0")
+	muted     = lipgloss.Color("#fdfdfd")
 	danger    = lipgloss.Color("#FF4D94")
 	bgLight   = lipgloss.Color("#222222")
 
@@ -45,9 +45,9 @@ type model struct {
 	cursor      int
 	lastKill    string
 	confirmKill bool
+	confirmQuit bool 
 	search      string
 	totalMem    float32
-	isKilling   bool
 }
 
 func doTick() tea.Cmd {
@@ -125,7 +125,7 @@ func (m model) Init() tea.Cmd { return doTick() }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
-		if !m.confirmKill {
+		if !m.confirmKill && !m.confirmQuit {
 			m.ports = scanPorts()
 			m.applyFilter()
 		}
@@ -136,14 +136,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if msg.String() == "esc" || msg.String() == "n" {
+			m.confirmKill = false
+			m.confirmQuit = false
+			if msg.String() == "esc" {
+				m.search = ""
+				m.applyFilter()
+			}
+			return m, nil
+		}
+
+		if m.confirmQuit {
+			if msg.String() == "y" {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+
+		// Logique standard
 		switch msg.String() {
 		case "ctrl+c", "q":
-			return m, tea.Quit
-
-		case "esc":
-			m.confirmKill = false
-			m.search = ""
-			m.applyFilter()
+			m.confirmQuit = true
+			return m, nil
 
 		case "up", "k":
 			if m.cursor > 0 { m.cursor-- }
@@ -157,34 +171,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "K":
-			if len(m.filtered) > 0 {
-				m.confirmKill = true
-			}
+			if len(m.filtered) > 0 { m.confirmKill = true }
 
 		case "y":
 			if m.confirmKill && len(m.filtered) > 0 {
 				t := m.filtered[m.cursor]
-
-				// SUPPRESSION RADICALE (OS SPECIFIC)
 				if runtime.GOOS == "windows" {
 					exec.Command("taskkill", "/F", "/PID", t.pid).Run()
 				} else {
-					if p, _ := os.FindProcess(atoi(t.pid)); p != nil {
-						p.Kill()
-					}
+					if p, _ := os.FindProcess(atoi(t.pid)); p != nil { p.Kill() }
 				}
-
 				m.lastKill = "KILLED: " + t.name
 				m.confirmKill = false
-
-				// Rafraîchissement immédiat
 				m.ports = scanPorts()
 				m.applyFilter()
-
 				return m, tea.Tick(time.Second*3, func(t time.Time) tea.Msg { return clearMsg{} })
 			}
-		case "n":
-			m.confirmKill = false
 
 		default:
 			if len(msg.String()) == 1 && msg.Runes[0] >= 32 && msg.Runes[0] <= 126 {
@@ -232,7 +234,7 @@ func (m model) View() string {
 	curr := portInfo{}
 	if len(m.filtered) > 0 { curr = m.filtered[m.cursor] }
 
-	inspect := fmt.Sprintf(
+	inspectText := fmt.Sprintf(
 		"UNIT ANALYSIS\n%s\n\nNAME   : %s\nPID    : %s\nPORT   : %s\n\nCPU    : %.2f%%\nMEMORY : %.1f MB\n\n%s",
 		strings.Repeat("─", 34),
 		curr.name, curr.pid, curr.port, curr.cpu, curr.mem,
@@ -240,19 +242,21 @@ func (m model) View() string {
 	)
 
 	if m.confirmKill {
-		inspect += "\n\n" + lipgloss.NewStyle().Background(danger).Foreground(white).Padding(0, 1).Bold(true).Render("KILL PROCESS? (Y/N)")
+		inspectText += "\n\n" + lipgloss.NewStyle().Background(danger).Foreground(white).Padding(0, 1).Bold(true).Render("KILL PROCESS? (Y/N)")
+	} else if m.confirmQuit {
+		inspectText += "\n\n" + lipgloss.NewStyle().Background(secondary).Foreground(white).Padding(0, 1).Bold(true).Render("QUIT GHOSTPORT? (Y/N)")
 	}
 
 	layout := lipgloss.JoinHorizontal(lipgloss.Top,
 		sideStyle.Render(portsCol.String()),
 		lipgloss.NewStyle().Width(32).Render(mainCol.String()),
-		inspectStyle.Foreground(white).Render(inspect),
+		inspectStyle.Foreground(white).Render(inspectText),
 	)
 
 	stats := fmt.Sprintf(" NODES: %d | TOTAL RSS: %.1f MB ", len(m.filtered), m.totalMem)
 	header := headerStyle.Render(" GHOSTPORT ENGINE ") + lipgloss.NewStyle().Foreground(muted).Render(stats)
 	searchBar := lipgloss.NewStyle().Foreground(primary).Bold(true).Render("\n SEARCH > " + m.search + "_")
-	footer := lipgloss.NewStyle().Foreground(muted).Render("\n K: KILL • ESC: RESET • Q: QUIT")
+	footer := lipgloss.NewStyle().Foreground(muted).Render("\n K: KILL • Q: QUIT • ESC: RESET")
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(header + searchBar + "\n\n" + layout + footer)
 }
