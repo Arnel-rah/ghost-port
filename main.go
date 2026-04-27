@@ -15,29 +15,20 @@ import (
 )
 
 type tickMsg time.Time
+type clearMsg struct{}
 
 var (
-	accent = lipgloss.Color("#00FFD1")
-	mute   = lipgloss.Color("#555555")
-	warn   = lipgloss.Color("#FF0055")
+	primary   = lipgloss.Color("#00FFFF")
+	secondary = lipgloss.Color("#9D7CFF")
+	white     = lipgloss.Color("#FAFAFA")
+	muted     = lipgloss.Color("#A0A0A0")
+	danger    = lipgloss.Color("#FF4D94")
+	bgLight   = lipgloss.Color("#222222")
 
-	sideStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder(), false, true, false, false).
-			BorderForeground(mute).
-			Padding(0, 1).
-			Width(12)
-
-	mainStyle = lipgloss.NewStyle().
-			Padding(0, 2).
-			Width(30)
-
-	inspectStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#1A1A1A")).
-			Padding(1).
-			Width(35).
-			Height(15)
-
-	selLine = lipgloss.NewStyle().Foreground(accent).Bold(true)
+	headerStyle = lipgloss.NewStyle().Foreground(white).Background(secondary).Padding(0, 2).Bold(true)
+	sideStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(muted).Padding(0, 1).Width(12).Foreground(white)
+	inspectStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(primary).Background(bgLight).Padding(1).Width(38)
+	selStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Background(primary).Bold(true)
 )
 
 type portInfo struct {
@@ -55,6 +46,8 @@ type model struct {
 	lastKill    string
 	confirmKill bool
 	search      string
+	totalMem    float32
+	isKilling   bool
 }
 
 func doTick() tea.Cmd {
@@ -64,27 +57,19 @@ func doTick() tea.Cmd {
 func scanPorts() []portInfo {
 	var results []portInfo
 	var cmd *exec.Cmd
-
 	if runtime.GOOS == "windows" {
 		cmd = exec.Command("netstat", "-ano", "-p", "TCP")
 	} else {
 		cmd = exec.Command("ss", "-tlnp")
 	}
-
-	out, err := cmd.Output()
-	if err != nil {
-		return results
-	}
-
+	out, _ := cmd.Output()
 	lines := strings.Split(string(out), "\n")
 	var re *regexp.Regexp
-
 	if runtime.GOOS == "windows" {
 		re = regexp.MustCompile(`TCP\s+\d+\.\d+\.\d+\.\d+:(\d+)\s+\d+\.\d+\.\d+\.\d+:\d+\s+LISTENING\s+(\d+)`)
 	} else {
 		re = regexp.MustCompile(`LISTEN\s+\d+\s+\d+\s+[^:]+:(\d+)\s+[^:]+:\*\s+users:\(\("([^"]+)",pid=(\d+)`)
 	}
-
 	for _, line := range lines {
 		m := re.FindStringSubmatch(line)
 		if len(m) >= 3 {
@@ -95,7 +80,6 @@ func scanPorts() []portInfo {
 			} else {
 				pStr, name, pidStr = m[1], m[2], m[3]
 			}
-
 			cpu, mem := 0.0, float32(0.0)
 			if proc, err := process.NewProcess(int32(atoi(pidStr))); err == nil {
 				if n, err := proc.Name(); err == nil && (name == "Ghost" || name == "") {
@@ -121,10 +105,12 @@ func atoi(s string) int {
 
 func (m *model) applyFilter() {
 	m.filtered = []portInfo{}
+	m.totalMem = 0
 	sLower := strings.ToLower(m.search)
 	for _, p := range m.ports {
 		if strings.Contains(strings.ToLower(p.name), sLower) || strings.Contains(p.port, m.search) {
 			m.filtered = append(m.filtered, p)
+			m.totalMem += p.mem
 		}
 	}
 	if len(m.filtered) == 0 {
@@ -139,45 +125,69 @@ func (m model) Init() tea.Cmd { return doTick() }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
-		m.ports = scanPorts()
-		m.applyFilter()
+		if !m.confirmKill {
+			m.ports = scanPorts()
+			m.applyFilter()
+		}
 		return m, doTick()
+
+	case clearMsg:
+		m.lastKill = ""
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+
+		case "esc":
+			m.confirmKill = false
+			m.search = ""
+			m.applyFilter()
+
 		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
+			if m.cursor > 0 { m.cursor-- }
 		case "down", "j":
-			if m.cursor < len(m.filtered)-1 {
-				m.cursor++
-			}
+			if m.cursor < len(m.filtered)-1 { m.cursor++ }
+
 		case "backspace":
 			if len(m.search) > 0 {
 				m.search = m.search[:len(m.search)-1]
 				m.applyFilter()
 			}
+
 		case "K":
 			if len(m.filtered) > 0 {
 				m.confirmKill = true
 			}
+
 		case "y":
 			if m.confirmKill && len(m.filtered) > 0 {
 				t := m.filtered[m.cursor]
-				if p, _ := os.FindProcess(atoi(t.pid)); p != nil {
-					p.Kill()
-					m.lastKill = t.name + " Terminated"
+
+				// SUPPRESSION RADICALE (OS SPECIFIC)
+				if runtime.GOOS == "windows" {
+					exec.Command("taskkill", "/F", "/PID", t.pid).Run()
+				} else {
+					if p, _ := os.FindProcess(atoi(t.pid)); p != nil {
+						p.Kill()
+					}
 				}
+
+				m.lastKill = "KILLED: " + t.name
 				m.confirmKill = false
+
+				// Rafraîchissement immédiat
 				m.ports = scanPorts()
 				m.applyFilter()
+
+				return m, tea.Tick(time.Second*3, func(t time.Time) tea.Msg { return clearMsg{} })
 			}
 		case "n":
 			m.confirmKill = false
+
 		default:
-			if len(msg.String()) == 1 {
+			if len(msg.String()) == 1 && msg.Runes[0] >= 32 && msg.Runes[0] <= 126 {
 				m.search += msg.String()
 				m.applyFilter()
 			}
@@ -186,65 +196,65 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func makeProgressBar(percent float32) string {
+func renderBar(val float32) string {
 	width := 10
-	filled := int(float32(width) * (percent / 500.0))
-	if filled > width {
-		filled = width
-	}
-	return "[" + strings.Repeat("■", filled) + strings.Repeat(" ", width-filled) + "]"
+	filled := int(val / 100)
+	if filled > width { filled = width }
+	barStyle := lipgloss.NewStyle().Foreground(primary)
+	if val > 300 { barStyle = lipgloss.NewStyle().Foreground(danger) }
+	return "[" + barStyle.Render(strings.Repeat("■", filled)+strings.Repeat(" ", width-filled)) + "]"
 }
 
 func (m model) View() string {
-	if len(m.filtered) == 0 {
-		return "Searching for spectral activity..."
+	if len(m.filtered) == 0 && m.search == "" {
+		return "GHOSTPORT // SCANNING..."
 	}
 
 	var portsCol, mainCol strings.Builder
 	start, end := 0, len(m.filtered)
-	if m.cursor > 8 {
-		start = m.cursor - 8
-	}
-	if start+15 < end {
-		end = start + 15
-	}
+	if m.cursor > 8 { start = m.cursor - 8 }
+	if start+12 < end { end = start + 12 }
 
 	for i := start; i < end; i++ {
 		p := m.filtered[i]
-		pStr := fmt.Sprintf(":%-5s", p.port)
-		nStr := fmt.Sprintf("%-12s %s", p.name, makeProgressBar(p.mem))
+		pStr := fmt.Sprintf(" :%-5s ", p.port)
+		nStr := fmt.Sprintf(" %-12s %s", p.name, renderBar(p.mem))
 
 		if m.cursor == i {
-			portsCol.WriteString(selLine.Render(pStr) + "\n")
-			mainCol.WriteString(selLine.Render(nStr) + "\n")
+			portsCol.WriteString(selStyle.Render(pStr) + "\n")
+			mainCol.WriteString(selStyle.Render(nStr) + "\n")
 		} else {
-			portsCol.WriteString(pStr + "\n")
-			mainCol.WriteString(nStr + "\n")
+			portsCol.WriteString(lipgloss.NewStyle().Foreground(white).Render(pStr) + "\n")
+			mainCol.WriteString(lipgloss.NewStyle().Foreground(white).Render(nStr) + "\n")
 		}
 	}
 
-	curr := m.filtered[m.cursor]
+	curr := portInfo{}
+	if len(m.filtered) > 0 { curr = m.filtered[m.cursor] }
+
 	inspect := fmt.Sprintf(
-		"INSPECTOR\n%s\n\nNAME: %s\nPID:  %s\nPORT: %s\n\nCPU:  %.2f%%\nRAM:  %.1f MB\n\n%s",
-		strings.Repeat("─", 30),
+		"UNIT ANALYSIS\n%s\n\nNAME   : %s\nPID    : %s\nPORT   : %s\n\nCPU    : %.2f%%\nMEMORY : %.1f MB\n\n%s",
+		strings.Repeat("─", 34),
 		curr.name, curr.pid, curr.port, curr.cpu, curr.mem,
-		lipgloss.NewStyle().Foreground(warn).Render(m.lastKill),
+		lipgloss.NewStyle().Foreground(danger).Bold(true).Render(m.lastKill),
 	)
 
 	if m.confirmKill {
-		inspect += "\n\n" + lipgloss.NewStyle().Background(warn).Bold(true).Padding(0, 1).Render("KILL PROCESS? (Y/N)")
+		inspect += "\n\n" + lipgloss.NewStyle().Background(danger).Foreground(white).Padding(0, 1).Bold(true).Render("KILL PROCESS? (Y/N)")
 	}
 
 	layout := lipgloss.JoinHorizontal(lipgloss.Top,
 		sideStyle.Render(portsCol.String()),
-		mainStyle.Render(mainCol.String()),
-		inspectStyle.Render(inspect),
+		lipgloss.NewStyle().Width(32).Render(mainCol.String()),
+		inspectStyle.Foreground(white).Render(inspect),
 	)
 
-	header := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("GHOSTPORT // SEARCH: " + m.search + "_")
-	footer := lipgloss.NewStyle().Foreground(mute).Render("\nK: Kill • Q: Quit • Nav: ↑/↓")
+	stats := fmt.Sprintf(" NODES: %d | TOTAL RSS: %.1f MB ", len(m.filtered), m.totalMem)
+	header := headerStyle.Render(" GHOSTPORT ENGINE ") + lipgloss.NewStyle().Foreground(muted).Render(stats)
+	searchBar := lipgloss.NewStyle().Foreground(primary).Bold(true).Render("\n SEARCH > " + m.search + "_")
+	footer := lipgloss.NewStyle().Foreground(muted).Render("\n K: KILL • ESC: RESET • Q: QUIT")
 
-	return lipgloss.NewStyle().Padding(1).Render(header + "\n\n" + layout + footer)
+	return lipgloss.NewStyle().Padding(1, 2).Render(header + searchBar + "\n\n" + layout + footer)
 }
 
 func main() {
