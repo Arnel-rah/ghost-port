@@ -49,11 +49,11 @@ type portInfo struct {
 }
 
 type model struct {
-	ports   []portInfo
-	cursor  int
+	ports    []portInfo
+	cursor   int
 	lastKill string
-	width   int
-	height  int
+	width    int
+	height   int
 }
 
 func doTick() tea.Cmd {
@@ -73,7 +73,9 @@ func scanPorts() []portInfo {
 			port, pid := matches[1], matches[2]
 			name := "Ghost"
 			if p, err := process.NewProcess(int32(atoi(pid))); err == nil {
-				if n, err := p.Name(); err == nil { name = n }
+				if n, err := p.Name(); err == nil {
+					name = n
+				}
 			}
 			results = append(results, portInfo{port, pid, name})
 		}
@@ -95,12 +97,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case tickMsg:
 		m.ports = scanPorts()
+		if m.cursor >= len(m.ports) && len(m.ports) > 0 {
+			m.cursor = len(m.ports) - 1
+		}
 		return m, doTick()
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q": return m, tea.Quit
-		case "up", "k": if m.cursor > 0 { m.cursor-- }
-		case "down", "j": if m.cursor < len(m.ports)-1 { m.cursor++ }
+		case "ctrl+c", "q":
+			return m, tea.Quit
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.ports)-1 {
+				m.cursor++
+			}
 		case "K":
 			if len(m.ports) > 0 {
 				target := m.ports[m.cursor]
@@ -117,16 +129,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	if len(m.ports) == 0 {
-		return "Scanning for ghosts..."
+		return windowStyle.Render("Scanning for ghosts...")
 	}
 
 	var portList strings.Builder
-	for i, p := range m.ports {
+	start := 0
+	if m.cursor > 10 {
+		start = m.cursor - 10
+	}
+	end := start + 15
+	if end > len(m.ports) {
+		end = len(m.ports)
+	}
+
+	for i := start; i < end; i++ {
+		p := m.ports[i]
 		cursor := "  "
 		row := fmt.Sprintf("%-6s | %-15s", p.port, p.name)
 		if m.cursor == i {
-			cursor = "󰚔 "
-			portList.WriteString(selectedStyle.Render(cursor + row) + "\n")
+			cursor = "> "
+			portList.WriteString(selectedStyle.Render(cursor+row) + "\n")
 		} else {
 			portList.WriteString(cursor + row + "\n")
 		}
@@ -142,12 +164,12 @@ func (m model) View() string {
 		),
 	)
 
-	footer := lipgloss.NewStyle().Foreground(gray).Render("\n[SHIFT+K] EXORCISE • [Q] DISCONNECT")
+	footer := lipgloss.NewStyle().Foreground(gray).Render("\n[SHIFT+K] EXORCISE | [Q] DISCONNECT")
 
 	return windowStyle.Render(
 		titleStyle.Render(" GHOSTPORT v1.0 - PARANORMAL ACTIVITY DETECTOR ") + "\n\n" +
-		mainContent +
-		footer,
+			mainContent +
+			footer,
 	)
 }
 
