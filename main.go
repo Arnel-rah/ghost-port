@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,19 +18,30 @@ import (
 type tickMsg time.Time
 type clearMsg struct{}
 
+type sortMode int
+
+const (
+	sortPort sortMode = iota
+	sortName
+	sortRAM
+)
+
 var (
+	winRe   = regexp.MustCompile(`TCP\s+\d+\.\d+\.\d+\.\d+:(\d+)\s+\d+\.\d+\.\d+\.\d+:\d+\s+LISTENING\s+(\d+)`)
+	linuxRe = regexp.MustCompile(`LISTEN\s+\d+\s+\d+\s+[^:]+:(\d+)\s+[^:]+:\*\s+users:\(\("([^"]+)",pid=(\d+)`)
+
 	primary   = lipgloss.Color("#00FFFF")
 	secondary = lipgloss.Color("#9D7CFF")
 	white     = lipgloss.Color("#FAFAFA")
-	muted     = lipgloss.Color("#ffffff")
+	muted     = lipgloss.Color("#A0A0A0")
 	danger    = lipgloss.Color("#FF4D94")
 	success   = lipgloss.Color("#00FF88")
 	bgLight   = lipgloss.Color("#222222")
 
-	headerStyle  = lipgloss.NewStyle().Foreground(white).Background(secondary).Padding(0, 2).Bold(true)
-	sideStyle    = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(muted).Padding(0, 1).Width(12).Foreground(white)
+	headerStyle = lipgloss.NewStyle().Foreground(white).Background(secondary).Padding(0, 2).Bold(true)
+	sideStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(muted).Padding(0, 1).Width(12).Foreground(white)
 	inspectStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(primary).Background(bgLight).Padding(1).Width(38)
-	selStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Background(primary).Bold(true)
+	selStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Background(primary).Bold(true)
 )
 
 type portInfo struct {
@@ -49,10 +61,20 @@ type model struct {
 	confirmQuit bool
 	search      string
 	totalMem    float32
+	mode        sortMode
+	logs        []string
 }
 
 func doTick() tea.Cmd {
 	return tea.Tick(time.Millisecond*800, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+func (m *model) addLog(msg string) {
+	ts := time.Now().Format("15:04:05")
+	m.logs = append([]string{fmt.Sprintf("[%s] %s", ts, msg)}, m.logs...)
+	if len(m.logs) > 3 {
+		m.logs = m.logs[:3]
+	}
 }
 
 func scanPorts() []portInfo {
@@ -65,21 +87,22 @@ func scanPorts() []portInfo {
 	}
 	out, _ := cmd.Output()
 	lines := strings.Split(string(out), "\n")
-	var re *regexp.Regexp
-	if runtime.GOOS == "windows" {
-		re = regexp.MustCompile(`TCP\s+\d+\.\d+\.\d+\.\d+:(\d+)\s+\d+\.\d+\.\d+\.\d+:\d+\s+LISTENING\s+(\d+)`)
-	} else {
-		re = regexp.MustCompile(`LISTEN\s+\d+\s+\d+\s+[^:]+:(\d+)\s+[^:]+:\*\s+users:\(\("([^"]+)",pid=(\d+)`)
-	}
+
 	for _, line := range lines {
-		m := re.FindStringSubmatch(line)
-		if len(m) >= 3 {
+		var res []string
+		if runtime.GOOS == "windows" {
+			res = winRe.FindStringSubmatch(line)
+		} else {
+			res = linuxRe.FindStringSubmatch(line)
+		}
+
+		if len(res) >= 3 {
 			var pStr, pidStr, name string
 			if runtime.GOOS == "windows" {
-				pStr, pidStr = m[1], m[2]
+				pStr, pidStr = res[1], res[2]
 				name = "Ghost"
 			} else {
-				pStr, name, pidStr = m[1], m[2], m[3]
+				pStr, name, pidStr = res[1], res[2], res[3]
 			}
 			cpu, mem := 0.0, float32(0.0)
 			if proc, err := process.NewProcess(int32(atoi(pidStr))); err == nil {
@@ -114,10 +137,33 @@ func (m *model) applyFilter() {
 			m.totalMem += p.mem
 		}
 	}
+
+	sort.Slice(m.filtered, func(i, j int) bool {
+		switch m.mode {
+		case sortName:
+			return strings.ToLower(m.filtered[i].name) < strings.ToLower(m.filtered[j].name)
+		case sortRAM:
+			return m.filtered[i].mem > m.filtered[j].mem
+		default:
+			return atoi(m.filtered[i].port) < atoi(m.filtered[j].port)
+		}
+	})
+
 	if len(m.filtered) == 0 {
 		m.cursor = 0
 	} else if m.cursor >= len(m.filtered) {
 		m.cursor = len(m.filtered) - 1
+	}
+}
+
+func (m model) getSortName() string {
+	switch m.mode {
+	case sortName:
+		return "BY NAME"
+	case sortRAM:
+		return "BY RAM"
+	default:
+		return "BY PORT"
 	}
 }
 
@@ -151,6 +197,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "y" {
 				return m, tea.Quit
 			}
+			m.confirmQuit = false
 			return m, nil
 		}
 
@@ -159,10 +206,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.confirmQuit = true
 			return m, nil
 
+		case "s":
+			m.mode = (m.mode + 1) % 3
+			m.applyFilter()
+			m.statusMsg = "SORTED " + m.getSortName()
+			m.addLog("Sort changed to " + m.getSortName())
+			return m, tea.Tick(time.Second*2, func(t time.Time) tea.Msg { return clearMsg{} })
+
 		case "r":
 			m.ports = scanPorts()
 			m.applyFilter()
 			m.statusMsg = "SYSTEM REFRESHED"
+			m.addLog("Manual refresh triggered")
 			return m, tea.Tick(time.Second*2, func(t time.Time) tea.Msg { return clearMsg{} })
 
 		case "up", "k":
@@ -196,6 +251,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.statusMsg = "KILLED: " + t.name
+				m.addLog("Killed process: " + t.name)
 				m.confirmKill = false
 				m.ports = scanPorts()
 				m.applyFilter()
@@ -259,15 +315,17 @@ func (m model) View() string {
 	}
 
 	msgColor := danger
-	if strings.Contains(m.statusMsg, "REFRESHED") {
+	if strings.Contains(m.statusMsg, "REFRESHED") || strings.Contains(m.statusMsg, "SORTED") {
 		msgColor = success
 	}
 
+	logDisplay := strings.Join(m.logs, "\n")
 	inspectText := fmt.Sprintf(
-		"UNIT ANALYSIS\n%s\n\nNAME   : %s\nPID    : %s\nPORT   : %s\n\nCPU    : %.2f%%\nMEMORY : %.1f MB\n\n%s",
+		"UNIT ANALYSIS\n%s\n\nNAME   : %s\nPID    : %s\nPORT   : %s\n\nCPU    : %.2f%%\nMEMORY : %.1f MB\n\n%s\n\nLOGS:\n%s",
 		strings.Repeat("─", 34),
 		curr.name, curr.pid, curr.port, curr.cpu, curr.mem,
 		lipgloss.NewStyle().Foreground(msgColor).Bold(true).Render(m.statusMsg),
+		lipgloss.NewStyle().Foreground(muted).Render(logDisplay),
 	)
 
 	if m.confirmKill {
@@ -282,10 +340,10 @@ func (m model) View() string {
 		inspectStyle.Foreground(white).Render(inspectText),
 	)
 
-	stats := fmt.Sprintf(" NODES: %d | TOTAL RSS: %.1f MB ", len(m.filtered), m.totalMem)
+	stats := fmt.Sprintf(" NODES: %d | MODE: %s ", len(m.filtered), m.getSortName())
 	header := headerStyle.Render(" GHOSTPORT ENGINE ") + lipgloss.NewStyle().Foreground(muted).Render(stats)
 	searchBar := lipgloss.NewStyle().Foreground(primary).Bold(true).Render("\n SEARCH > " + m.search + "_")
-	footer := lipgloss.NewStyle().Foreground(muted).Render("\n R: REFRESH • K: KILL • Q: QUIT • ESC: RESET")
+	footer := lipgloss.NewStyle().Foreground(muted).Render("\n S: SORT • R: REFRESH • K: KILL • Q: QUIT")
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(header + searchBar + "\n\n" + layout + footer)
 }
