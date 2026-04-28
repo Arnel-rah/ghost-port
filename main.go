@@ -295,19 +295,25 @@ func (m model) View() string {
 		end = start + 12
 	}
 
-	for i := start; i < end; i++ {
-		p := m.filtered[i]
-		pStr := fmt.Sprintf(" :%-5s ", p.port)
-		nStr := fmt.Sprintf(" %-12s %s", p.name, renderBar(p.mem))
+for i := start; i < end; i++ {
+    p := m.filtered[i]
+    pStr := fmt.Sprintf(" :%-5s ", p.port)
 
-		if m.cursor == i {
-			portsCol.WriteString(selStyle.Render(pStr) + "\n")
-			mainCol.WriteString(selStyle.Render(nStr) + "\n")
-		} else {
-			portsCol.WriteString(lipgloss.NewStyle().Foreground(white).Render(pStr) + "\n")
-			mainCol.WriteString(lipgloss.NewStyle().Foreground(white).Render(nStr) + "\n")
-		}
-	}
+    displayName := p.name
+    if len(displayName) > 15 {
+        displayName = displayName[:12] + "..."
+    }
+
+    nStr := fmt.Sprintf(" %-15s %s", displayName, renderBar(p.mem))
+
+    if m.cursor == i {
+        portsCol.WriteString(selStyle.Render(pStr) + "\n")
+        mainCol.WriteString(selStyle.Render(nStr) + "\n")
+    } else {
+        portsCol.WriteString(lipgloss.NewStyle().Foreground(white).Render(pStr) + "\n")
+        mainCol.WriteString(lipgloss.NewStyle().Foreground(white).Render(nStr) + "\n")
+    }
+}
 
 	curr := portInfo{}
 	if len(m.filtered) > 0 {
