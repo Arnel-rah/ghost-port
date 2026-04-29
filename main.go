@@ -33,7 +33,7 @@ var (
 	primary   = lipgloss.Color("#00FFFF")
 	secondary = lipgloss.Color("#9D7CFF")
 	white     = lipgloss.Color("#FAFAFA")
-	muted     = lipgloss.Color("#A0A0A0")
+	muted     = lipgloss.Color("#f3f3f3")
 	danger    = lipgloss.Color("#FF4D94")
 	success   = lipgloss.Color("#00FF88")
 	bgLight   = lipgloss.Color("#222222")

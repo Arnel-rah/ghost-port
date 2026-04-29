@@ -33,3 +33,5 @@ pre-commit: lint-all check-secrets test ## Run all checks before committing (inc
 build:
 	@go build -o ghostport.exe main.go
 	@echo "Build terminé : ghostport.exe"
+gen-proto:
+	protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative proto/monitor.proto

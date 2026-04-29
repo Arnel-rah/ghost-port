@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package proto;
+option go_package = "./proto";
+
+import "google/protobuf/empty.proto";
+
+service PortMonitor {
+  rpc StreamPorts(google.protobuf.Empty) returns (stream PortList);
+  rpc KillProcess(PidRequest) returns (KillResponse);
+}
+
+message PidRequest {
+  string pid = 1;
+}
+
+message KillResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message PortList {
+  repeated PortInfo ports = 1;
+  float total_mem = 2;
+}
+
+message PortInfo {
+  string port = 1;
+  string pid = 2;
+  string name = 3;
+  float cpu = 4;
+  float mem = 5;
+}
