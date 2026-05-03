@@ -6,12 +6,12 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/shirou/gopsutil/v3 v3.24.5
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
 	golang.org/x/net v0.49.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 )
 
 require (

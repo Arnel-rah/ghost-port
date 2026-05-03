@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	pb "ghost-port/proto"
+	pb "github.com/Arnel-rah/ghostport/proto"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
