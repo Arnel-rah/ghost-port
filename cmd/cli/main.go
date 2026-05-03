@@ -13,26 +13,23 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/emptypb" // Import nécessaire
 
-	pb "ghost-port/proto"
+	pb "github.com/Arnel-rah/ghostport/proto"
 )
 
 type portMsg *pb.PortList
 type errorMsg error
 
 var (
-	primary   = lipgloss.Color("#00FFFF")
-	secondary = lipgloss.Color("#9D7CFF")
-	white     = lipgloss.Color("#FAFAFA")
-	muted     = lipgloss.Color("#A0A0A0")
-	danger    = lipgloss.Color("#FF4D94")
-	success   = lipgloss.Color("#00FF88")
-	bgLight   = lipgloss.Color("#222222")
-
-	headerStyle = lipgloss.NewStyle().Foreground(white).Background(secondary).Padding(0, 2).Bold(true)
-	sideStyle   = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(muted).Padding(0, 1).Width(12).Foreground(white)
-	inspectStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(primary).Background(bgLight).Padding(1).Width(38)
-	selStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Background(primary).Bold(true)
+	primary      = lipgloss.Color("#00FFFF")
+	secondary    = lipgloss.Color("#9D7CFF")
+	white        = lipgloss.Color("#FAFAFA")
+	muted        = lipgloss.Color("#A0A0A0")
+	danger       = lipgloss.Color("#FF4D94")
+	bgLight      = lipgloss.Color("#222222")
+	headerStyle  = lipgloss.NewStyle().Foreground(white).Background(secondary).Padding(0, 2).Bold(true)
+	selStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Background(primary).Bold(true)
 )
 
 type model struct {
@@ -41,13 +38,11 @@ type model struct {
 	ports       []*pb.PortInfo
 	filtered    []*pb.PortInfo
 	cursor      int
-	statusMsg   string
-	confirmKill bool
-	confirmQuit bool
 	search      string
 	totalMem    float32
 	mode        int
-	logs        []string
+	confirmKill bool
+	confirmQuit bool
 }
 
 func waitForData(stream pb.PortMonitor_StreamPortsClient) tea.Cmd {
@@ -57,14 +52,6 @@ func waitForData(stream pb.PortMonitor_StreamPortsClient) tea.Cmd {
 			return errorMsg(err)
 		}
 		return portMsg(data)
-	}
-}
-
-func (m *model) addLog(msg string) {
-	ts := time.Now().Format("15:04:05")
-	m.logs = append([]string{fmt.Sprintf("[%s] %s", ts, msg)}, m.logs...)
-	if len(m.logs) > 3 {
-		m.logs = m.logs[:3]
 	}
 }
 
@@ -112,10 +99,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.confirmQuit { return m, tea.Quit }
 			if m.confirmKill && len(m.filtered) > 0 {
 				target := m.filtered[m.cursor]
-				_, err := m.client.KillProcess(context.Background(), &pb.PidRequest{Pid: target.Pid})
-				if err == nil {
-					m.addLog("Killed: " + target.Name)
-				}
+				_, _ = m.client.KillProcess(context.Background(), &pb.PidRequest{Pid: target.Pid})
 				m.confirmKill = false
 			}
 		case "n", "esc":
@@ -146,11 +130,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	// ... (Garde ta logique View précédente, adapte juste les accès aux champs p.Port, p.Name etc.)
-    return "Interface de monitoring gRPC active..." // Simplifié pour l'exemple
+	var s strings.Builder
+	s.WriteString(headerStyle.Render(" GHOSTPORT REMOTE MONITOR ") + "\n\n")
+
+	if m.confirmQuit {
+		return s.String() + danger.Render(" Quitter l'application ? (y/n)")
+	}
+	if m.confirmKill {
+		return s.String() + danger.Render(" Tuer le processus sélectionné ? (y/n)")
+	}
+
+	s.WriteString(fmt.Sprintf(" Filtrer: [%s] | Mode: %d | Total RAM: %.2f MB\n\n", m.search, m.mode, m.totalMem))
+
+	for i, p := range m.filtered {
+		cursor := "  "
+		lineStyle := lipgloss.NewStyle().Foreground(white)
+
+		// Tronquer le nom pour éviter le dépassement
+		displayName := p.Name
+		if len(displayName) > 20 {
+			displayName = displayName[:17] + "..."
+		}
+
+		content := fmt.Sprintf(":%-6s %-20s [%.2f MB]", p.Port, displayName, p.Mem)
+
+		if m.cursor == i {
+			cursor = "> "
+			s.WriteString(selStyle.Render(cursor+content) + "\n")
+		} else {
+			s.WriteString(lineStyle.Render(cursor+content) + "\n")
+		}
+	}
+
+	s.WriteString("\n" + muted.Render("↑/↓: Naviguer | s: Trier | K: Kill | q: Quitter"))
+	return s.String()
 }
 
 func main() {
+	// Connexion à l'Agent
 	conn, err := grpc.Dial("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatal(err)
@@ -158,7 +175,7 @@ func main() {
 	defer conn.Close()
 
 	client := pb.NewPortMonitorClient(conn)
-	stream, err := client.StreamPorts(context.Background(), &pb.Empty{})
+	stream, err := client.StreamPorts(context.Background(), &emptypb.Empty{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -169,6 +186,7 @@ func main() {
 	}, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
+		fmt.Printf("Erreur: %v", err)
 		os.Exit(1)
 	}
 }

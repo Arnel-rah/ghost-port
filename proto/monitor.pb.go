@@ -268,7 +268,7 @@ const file_proto_monitor_proto_rawDesc = "" +
 	"\x03mem\x18\x05 \x01(\x02R\x03mem2~\n" +
 	"\vPortMonitor\x128\n" +
 	"\vStreamPorts\x12\x16.google.protobuf.Empty\x1a\x0f.proto.PortList0\x01\x125\n" +
-	"\vKillProcess\x12\x11.proto.PidRequest\x1a\x13.proto.KillResponseB\tZ\a./protob\x06proto3"
+	"\vKillProcess\x12\x11.proto.PidRequest\x1a\x13.proto.KillResponseB&Z$github.com/Arnel-rah/ghostport/protob\x06proto3"
 
 var (
 	file_proto_monitor_proto_rawDescOnce sync.Once
