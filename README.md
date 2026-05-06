@@ -458,7 +458,7 @@ A tool made with love, for developers who believe their terminal should be as be
 
 ---
 
-**Made with ❤️ by [Raharinandrasana Willys Sadi Arnel](https://github.com/Arnel-rah)**
+**Made by [Raharinandrasana Willys Sadi Arnel](https://github.com/Arnel-rah)**
 
 *"Because port hunting shouldn't feel like a haunted house."*
 
