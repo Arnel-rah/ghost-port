@@ -91,11 +91,9 @@ func (app *GhostPortApp) View() string {
 		return "GHOSTPORT // SCANNING..."
 	}
 
-	// Rendre les ports
 	visibleRange := ui.CalculateVisibleRange(app.cursor, len(app.filtered), app.config.VisibleRows)
 	portsCol, mainCol := app.uiRenderer.Render(app.filtered, app.cursor, visibleRange)
 
-	// Préparer l'inspecteur
 	curr := domain.PortInfo{}
 	if len(app.filtered) > 0 {
 		curr = app.filtered[app.cursor]
@@ -109,7 +107,6 @@ func (app *GhostPortApp) View() string {
 	logDisplay := strings.Join(app.logs, "\n")
 	inspectText := app.buildInspectText(curr, msgColor, logDisplay)
 
-	// Layout
 	layout := lipgloss.JoinHorizontal(lipgloss.Top,
 		app.styles.Side.Render(portsCol),
 		lipgloss.NewStyle().Width(32).Render(mainCol),
@@ -308,11 +305,3 @@ func (app *GhostPortApp) tickCmd() tea.Cmd {
 
 type tickMsg time.Time
 type clearMsg struct{}
-
-func (f *PortFilter) GetSearchTerm() string {
-	return f.searchTerm
-}
-
-func (f *PortFilter) GetSortMode() domain.SortMode {
-	return f.sortMode
-}

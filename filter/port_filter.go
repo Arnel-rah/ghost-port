@@ -21,8 +21,16 @@ func (f *PortFilter) SetSearchTerm(term string) {
 	f.searchTerm = strings.ToLower(term)
 }
 
+func (f *PortFilter) GetSearchTerm() string {
+	return f.searchTerm
+}
+
 func (f *PortFilter) SetSortMode(mode domain.SortMode) {
 	f.sortMode = mode
+}
+
+func (f *PortFilter) GetSortMode() domain.SortMode {
+	return f.sortMode
 }
 
 func (f *PortFilter) Filter(ports []domain.PortInfo) []domain.PortInfo {
