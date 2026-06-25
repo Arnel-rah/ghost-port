@@ -1,8 +1,8 @@
 package filter
 
 import (
-	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Arnel-rah/ghostport/domain"
@@ -32,10 +32,9 @@ func (f *PortFilter) SetSortMode(mode domain.SortMode) {
 func (f *PortFilter) GetSortMode() domain.SortMode {
 	return f.sortMode
 }
-
 func (f *PortFilter) Filter(ports []domain.PortInfo) []domain.PortInfo {
 	filtered := f.applySearchFilter(ports)
-	f.sortFiltered(filtered)
+	f.applySort(filtered)
 	return filtered
 }
 
@@ -44,17 +43,17 @@ func (f *PortFilter) applySearchFilter(ports []domain.PortInfo) []domain.PortInf
 		return ports
 	}
 
-	var filtered []domain.PortInfo
+	filtered := make([]domain.PortInfo, 0, len(ports))
 	for _, p := range ports {
 		if strings.Contains(strings.ToLower(p.Name), f.searchTerm) ||
-			strings.Contains(p.Port, f.searchTerm) {
+			strings.Contains(strings.ToLower(p.Port), f.searchTerm) {
 			filtered = append(filtered, p)
 		}
 	}
 	return filtered
 }
 
-func (f *PortFilter) sortFiltered(ports []domain.PortInfo) {
+func (f *PortFilter) applySort(ports []domain.PortInfo) {
 	sort.Slice(ports, func(i, j int) bool {
 		switch f.sortMode {
 		case domain.SortName:
@@ -62,13 +61,15 @@ func (f *PortFilter) sortFiltered(ports []domain.PortInfo) {
 		case domain.SortRAM:
 			return ports[i].Mem > ports[j].Mem
 		default:
-			return atoi(ports[i].Port) < atoi(ports[j].Port)
+			return parsePort(ports[i].Port) < parsePort(ports[j].Port)
 		}
 	})
 }
 
-func atoi(s string) int {
-	var res int
-	fmt.Sscanf(s, "%d", &res)
-	return res
+func parsePort(s string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0
+	}
+	return n
 }
