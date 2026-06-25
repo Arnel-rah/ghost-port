@@ -8,22 +8,40 @@ import (
 	"github.com/Arnel-rah/ghostport/domain"
 )
 
+const (
+	memBarWidth    = 10
+	nameMaxLen     = 15
+	nameTruncLen   = 12
+	memDangerMB    = 300
+	scrollOffset   = 8
+)
+
+type VisibleRange struct {
+	Start int
+	End   int
+}
+
 type PortListRenderer struct {
-	styles Styles
-	theme  Theme
+	styles    Styles
+	theme     Theme
+	normalStyle lipgloss.Style
 }
 
 func NewPortListRenderer(styles Styles, theme Theme) *PortListRenderer {
 	return &PortListRenderer{
-		styles: styles,
-		theme:  theme,
+		styles:      styles,
+		theme:       theme,
+		normalStyle: lipgloss.NewStyle().Foreground(theme.White),
 	}
 }
 
 func (r *PortListRenderer) Render(ports []domain.PortInfo, cursor int, visibleRange VisibleRange) (string, string) {
+	start := clamp(visibleRange.Start, 0, len(ports))
+	end := clamp(visibleRange.End, start, len(ports))
+
 	var portsCol, mainCol strings.Builder
 
-	for i := visibleRange.Start; i < visibleRange.End; i++ {
+	for i := start; i < end; i++ {
 		p := ports[i]
 		portStr := fmt.Sprintf(" :%-5s ", p.Port)
 		mainStr := r.formatMainColumn(p)
@@ -32,8 +50,8 @@ func (r *PortListRenderer) Render(ports []domain.PortInfo, cursor int, visibleRa
 			portsCol.WriteString(r.styles.Selected.Render(portStr) + "\n")
 			mainCol.WriteString(r.styles.Selected.Render(mainStr) + "\n")
 		} else {
-			portsCol.WriteString(lipgloss.NewStyle().Foreground(r.theme.White).Render(portStr) + "\n")
-			mainCol.WriteString(lipgloss.NewStyle().Foreground(r.theme.White).Render(mainStr) + "\n")
+			portsCol.WriteString(r.normalStyle.Render(portStr) + "\n")
+			mainCol.WriteString(r.normalStyle.Render(mainStr) + "\n")
 		}
 	}
 
@@ -41,41 +59,54 @@ func (r *PortListRenderer) Render(ports []domain.PortInfo, cursor int, visibleRa
 }
 
 func (r *PortListRenderer) formatMainColumn(p domain.PortInfo) string {
-	displayName := p.Name
-	if len(displayName) > 15 {
-		displayName = displayName[:12] + "..."
+	name := p.Name
+	if len(name) > nameMaxLen {
+		name = name[:nameTruncLen] + "..."
 	}
-
-	return fmt.Sprintf(" %-15s %s", displayName, r.renderMemoryBar(p.Mem))
+	return fmt.Sprintf(" %-15s %s", name, r.renderMemoryBar(p.Mem))
 }
 
 func (r *PortListRenderer) renderMemoryBar(mem float32) string {
-	width := 10
-	filled := int(mem / 100)
-	if filled > width {
-		filled = width
+	filled := int(float32(memBarWidth) * mem / memDangerMB)
+	filled = clamp(filled, 0, memBarWidth)
+
+	style := lipgloss.NewStyle().Foreground(r.theme.Primary)
+	if mem > memDangerMB {
+		style = lipgloss.NewStyle().Foreground(r.theme.Danger)
 	}
 
-	barStyle := lipgloss.NewStyle().Foreground(r.theme.Primary)
-	if mem > 300 {
-		barStyle = lipgloss.NewStyle().Foreground(r.theme.Danger)
-	}
-
-	return "[" + barStyle.Render(strings.Repeat("■", filled)+strings.Repeat(" ", width-filled)) + "]"
-}
-
-type VisibleRange struct {
-	Start int
-	End   int
+	bar := strings.Repeat("■", filled) + strings.Repeat(" ", memBarWidth-filled)
+	return "[" + style.Render(bar) + "]"
 }
 
 func CalculateVisibleRange(cursor, total, windowSize int) VisibleRange {
-	start, end := 0, total
-	if cursor > 8 {
-		start = cursor - 8
+	if total == 0 {
+		return VisibleRange{}
 	}
-	if start+windowSize < end {
-		end = start + windowSize
+
+	start := cursor - scrollOffset
+	if start < 0 {
+		start = 0
 	}
+
+	end := start + windowSize
+	if end > total {
+		end = total
+		start = end - windowSize
+		if start < 0 {
+			start = 0
+		}
+	}
+
 	return VisibleRange{Start: start, End: end}
+}
+
+func clamp(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
