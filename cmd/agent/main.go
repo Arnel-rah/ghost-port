@@ -13,10 +13,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	pb "github.com/Arnel-rah/ghostport/proto"
+	pb "google/protobuf/empty.proto"
 	"github.com/shirou/gopsutil/v3/process"
 )
-
 var (
 	winRe   = regexp.MustCompile(`TCP\s+\d+\.\d+\.\d+\.\d+:(\d+)\s+\d+\.\d+\.\d+\.\d+:\d+\s+LISTENING\s+(\d+)`)
 	linuxRe = regexp.MustCompile(`LISTEN\s+\d+\s+\d+\s+[^:]+:(\d+)\s+[^:]+:\*\s+users:\(\("([^"]+)",pid=(\d+)`)
